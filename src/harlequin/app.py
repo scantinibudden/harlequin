@@ -4,6 +4,7 @@ import asyncio
 import os
 import sys
 import time
+from contextlib import suppress
 from functools import partial
 from pathlib import Path
 from typing import (
@@ -90,6 +91,11 @@ from harlequin.exception import (
 from harlequin.history import History
 from harlequin.messages import NewCatalog, NewCatalogItems, WidgetMounted
 from harlequin.plugins import load_keymap_plugins
+from harlequin.profiles import (
+    ProfileCatalogItem,
+    build_adapter_for_profile,
+    wrap_catalog_with_profiles,
+)
 from harlequin.transaction_mode import HarlequinTransactionMode
 
 if TYPE_CHECKING:
@@ -186,7 +192,7 @@ class Harlequin(AppBase):
 
     def __init__(
         self,
-        adapter: HarlequinAdapter,
+        adapter: HarlequinAdapter | None,
         profile_name: str | None = None,
         *,
         keymap_names: Sequence[str] | None = None,
@@ -196,6 +202,8 @@ class Harlequin(AppBase):
         show_files: Path | None = None,
         show_s3: str | None = None,
         max_results: int | str = 100_000,
+        available_profiles: Sequence[str] | None = None,
+        config_path: Path | None = None,
         driver_class: Union[Type[Driver], None] = None,
         css_path: Union[CSSPathType, None] = None,
         watch_css: bool = False,
@@ -209,6 +217,8 @@ class Harlequin(AppBase):
         self.adapter = adapter
         self.profile_name = profile_name
         self.connection_hash = connection_hash
+        self.available_profiles = list(available_profiles or [])
+        self.config_path = config_path
         self.history: History | None = None
         self.show_files = show_files
         self.show_s3 = show_s3 or None
@@ -261,7 +271,9 @@ class Harlequin(AppBase):
         self.run_query_bar = RunQueryBar(
             max_results=self.max_results,
             classes="non-responsive",
-            show_cancel_button=self.adapter.IMPLEMENTS_CANCEL,
+            show_cancel_button=(
+                self.adapter.IMPLEMENTS_CANCEL if self.adapter is not None else False
+            ),
         )
         self.footer = Footer(show_command_palette=False)
 
@@ -316,7 +328,16 @@ class Harlequin(AppBase):
     async def on_mount(self) -> None:
         self.run_query_bar.limit_checkbox.value = False
 
-        self._connect()
+        if self.adapter is not None:
+            self._connect()
+        else:
+            # started without a connection; render the profile list in the
+            # Data Catalog so the user can pick one.
+            self.update_schema_data()
+            self.notify(
+                "Select a profile in the Data Catalog and press Enter to connect.",
+                title="Not Connected",
+            )
         self._load_catalog_cache()
         self.action_bind_keymaps(*self.keymap_names)
 
@@ -388,6 +409,9 @@ class Harlequin(AppBase):
         self.post_message(
             TransactionModeChanged(new_mode=message.connection.transaction_mode)
         )
+        self.run_query_bar.show_cancel_button = (
+            self.adapter.IMPLEMENTS_CANCEL if self.adapter is not None else False
+        )
         self.run_query_bar.set_responsive()
         self.results_viewer.show_table(did_run=False)
         if message.connection.init_message:
@@ -399,6 +423,12 @@ class Harlequin(AppBase):
     @on(HarlequinTree.NodeSubmitted)
     def insert_node_into_editor(self, message: HarlequinTree.NodeSubmitted) -> None:
         message.stop()
+        node_data = getattr(message.node, "data", None)
+        if isinstance(node_data, ProfileCatalogItem):
+            # profile nodes connect instead of inserting text
+            if not node_data.is_active and node_data.profile_name:
+                self.switch_profile(node_data.profile_name)
+            return
         if self.editor is None:
             # recycle message while editor loads
             callback = partial(self.post_message, message)
@@ -481,6 +511,13 @@ class Harlequin(AppBase):
     def driver_refresh_catalog(self, message: HarlequinDriver.Refreshcatalog) -> None:
         message.stop()
         self.update_schema_data()
+
+    @on(HarlequinDriver.ConnectToProfile)
+    def driver_connect_to_profile(
+        self, message: HarlequinDriver.ConnectToProfile
+    ) -> None:
+        message.stop()
+        self.switch_profile(message.profile_name)
 
     @on(EditorCollection.EditorSwitched)
     def update_internal_editor_state(
@@ -580,6 +617,33 @@ class Harlequin(AppBase):
                 )
             )
             self.exit(return_code=2, message=pretty_error_message(error))
+        elif (
+            message.worker.name == "_switch_profile"
+            and message.worker.error is not None
+        ):
+            # a failed runtime profile switch should not kill the app;
+            # return to the disconnected state instead.
+            title = getattr(
+                message.worker.error,
+                "title",
+                "Harlequin could not connect to your database.",
+            )
+            error = (
+                message.worker.error
+                if isinstance(message.worker.error, HarlequinError)
+                else HarlequinConnectionError(
+                    msg=str(message.worker.error), title=title
+                )
+            )
+            self.connection = None
+            self.profile_name = None
+            self._push_error_modal(
+                title="Connection Error",
+                header=title,
+                error=error,
+            )
+            self.data_catalog.database_tree.loading = False
+            self.update_schema_data()
 
     @on(HarlequinTree.CatalogError)
     def handle_catalog_error(self, message: HarlequinTree.CatalogError) -> None:
@@ -624,7 +688,21 @@ class Harlequin(AppBase):
 
     @on(NewCatalog)
     def handle_new_catalog(self, message: NewCatalog) -> None:
-        self.data_catalog.update_database_tree(message.catalog)
+        tree_catalog = message.catalog
+        if self.available_profiles:
+            active_name = self.profile_name if self.connection is not None else None
+            tree_catalog = wrap_catalog_with_profiles(
+                catalog=message.catalog,
+                profile_names=self.available_profiles,
+                active_profile_name=active_name,
+                active_label=(
+                    "(session)"
+                    if self.connection is not None
+                    and active_name not in self.available_profiles
+                    else None
+                ),
+            )
+        self.data_catalog.update_database_tree(tree_catalog)
         self.update_completers(message.catalog)
 
     @on(NewCatalogItems)
@@ -977,7 +1055,11 @@ class Harlequin(AppBase):
         active_profile_config, _ = get_config_for_profile(config_path, profile_name)
         active_profile_name = profile_name or config.get("default_profile")
         adapter_options = getattr(self.adapter, "ADAPTER_OPTIONS", None)
-        adapter_type = type(self.adapter).__name__
+        adapter_type = (
+            type(self.adapter).__name__
+            if self.adapter is not None
+            else "No adapter (not connected)"
+        )
 
         harlequin_info = HarlequinDebugInfo(
             active_profile_config=active_profile_config,
@@ -992,10 +1074,10 @@ class Harlequin(AppBase):
             adapter_options=adapter_options,
             adapter_type=adapter_type,
             adapter_details=self.adapter.ADAPTER_DETAILS
-            if self.adapter.provides_details
+            if self.adapter is not None and self.adapter.provides_details
             else "No details were provided by adapter.",
             adapter_driver_details=self.adapter.ADAPTER_DRIVER_DETAILS
-            if self.adapter.provides_driver_details
+            if self.adapter is not None and self.adapter.provides_driver_details
             else "No details were provided by the database driver.",
         )
         self.push_screen(
@@ -1050,6 +1132,54 @@ class Harlequin(AppBase):
         description="Connecting to DB",
     )
     def _connect(self) -> None:
+        assert self.adapter is not None
+        connection = self.adapter.connect()
+        self.post_message(DatabaseConnected(connection=connection))
+
+    def switch_profile(self, profile_name: str) -> None:
+        """
+        Close the current connection (if any) and connect to the named
+        config profile instead.
+        """
+        if profile_name == self.profile_name and self.connection is not None:
+            return
+        self.data_catalog.database_tree.loading = True
+        self.run_query_bar.set_not_responsive()
+        self._switch_profile(profile_name)
+
+    @work(
+        thread=True,
+        exclusive=True,
+        exit_on_error=False,
+        group="connect",
+        description="Switching profile",
+    )
+    def _switch_profile(self, profile_name: str) -> None:
+        # persist state for the connection we're leaving
+        update_catalog_cache(
+            connection_hash=self.connection_hash,
+            catalog=None,
+            s3_tree=None,
+            history=self.history,
+        )
+        if self.connection is not None:
+            old_connection = self.connection
+            self.connection = None
+            with suppress(Exception):
+                old_connection.close()
+        adapter, connection_hash = build_adapter_for_profile(
+            profile_name=profile_name, config_path=self.config_path
+        )
+        self.adapter = adapter
+        self.profile_name = profile_name
+        self.connection_hash = connection_hash
+        cache = get_catalog_cache()
+        history = cache.get_history(connection_hash) if cache is not None else None
+        self.history = history if history is not None else History.blank()
+        # discard the old connection's completions; they are rebuilt from
+        # the new catalog after the connection is made.
+        self.editor_collection.word_completer = None
+        self.editor_collection.member_completer = None
         connection = self.adapter.connect()
         self.post_message(DatabaseConnected(connection=connection))
 
@@ -1111,7 +1241,11 @@ class Harlequin(AppBase):
         description="Cancelling queries.",
     )
     def _cancel_query(self) -> None:
-        if self.connection is None or not self.adapter.IMPLEMENTS_CANCEL:
+        if (
+            self.connection is None
+            or self.adapter is None
+            or not self.adapter.IMPLEMENTS_CANCEL
+        ):
             return
         try:
             self.connection.cancel()
@@ -1253,6 +1387,9 @@ class Harlequin(AppBase):
     @work(thread=True, exclusive=True, exit_on_error=False, group="schema_updaters")
     def update_schema_data(self) -> None:
         if self.connection is None:
+            # still render the (all-disconnected) profile list in the catalog
+            if self.available_profiles:
+                self.post_message(NewCatalog(catalog=Catalog(items=[])))
             return
         catalog = self.connection.get_catalog()
         self.post_message(NewCatalog(catalog=catalog))

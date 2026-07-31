@@ -20,6 +20,7 @@ from harlequin.catalog import (
 )
 from harlequin.components.data_catalog.tree import HarlequinTree
 from harlequin.messages import NewCatalogItems, WidgetMounted
+from harlequin.profiles import ProfileCatalogItem
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -113,6 +114,11 @@ class DatabaseTree(HarlequinTree[CatalogItem], inherit_bindings=False):
         self.root.data.children = catalog.items if catalog is not None else []
         await self.reload()
         self._schedule_prefetch_scan()
+        # the active profile's node starts expanded, so its catalog is visible
+        # (and therefore prefetched by the viewport scan) as soon as we connect
+        for child in self.root.children:
+            if isinstance(child.data, ProfileCatalogItem) and child.data.is_active:
+                child.expand()
         self.loading = False
 
     def _add_to_load_queue(

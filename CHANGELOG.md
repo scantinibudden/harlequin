@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- The Data Catalog now shows all of the profiles defined in your config files and can switch between them at runtime: select a profile node and press Enter (or use the "Connect" context menu item) to make it the active connection ([#990](https://github.com/tconbeer/harlequin/discussions/990)).
+- If your config files define profiles but no default profile, running `harlequin` with no connection options now starts without a connection, so you can pick a profile from the Data Catalog.
+
 ### Performance
 
 - Importing Harlequin's adapter API no longer imports the TUI ([#524](https://github.com/tconbeer/harlequin/issues/524)). `import harlequin_duckdb` drops from ~770ms to ~120ms, and `import harlequin_sqlite` from ~700ms to ~65ms, since neither pulls in Textual, questionary, prompt_toolkit or sqlfmt any more. Adapter authors feel this on every test run; the TUI's own start-up is unchanged.
