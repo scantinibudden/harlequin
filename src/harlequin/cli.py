@@ -11,6 +11,7 @@ import rich_click as click
 from rich_click.utils import OptionGroupDict
 
 from harlequin import Harlequin
+from harlequin import config as harlequin_config
 from harlequin.adapter import HarlequinAdapter
 from harlequin.catalog_cache import get_connection_hash
 from harlequin.colors import GREEN, PINK, PURPLE, VALID_THEMES, YELLOW
@@ -41,6 +42,25 @@ DEFAULT_VIEWER_MAX_ROWS = 100_000
 DEFAULT_THEME = "harlequin"
 ALL_THEMES = ", ".join(VALID_THEMES.keys())
 DEFAULT_KEYMAP_NAMES = ["vscode"]
+
+# CLI params that configure the session rather than name a connection; used to
+# decide whether to start without one and let the user pick a profile.
+SESSION_ONLY_CLI_PARAMS = frozenset(
+    {
+        "theme",
+        "limit",
+        "viewer_max_rows",
+        "output",
+        "keymap_name",
+        "show_files",
+        "show_s3",
+        "locale",
+        "no_download_tzdata",
+        "config",
+        "keys",
+        "config_path",
+    }
+)
 
 # configure the rich click interface (mostly --help options)
 DOCS_URL = "https://harlequin.sh/docs/getting-started"
@@ -476,6 +496,7 @@ def build_cli(argv: Sequence[str]) -> click.Command:
             profile_config, user_defined_keymaps = load_profile_and_keymaps(
                 config_path=config_path, profile_name=profile
             )
+            full_config = harlequin_config.load_config(config_path=config_path)
         except HarlequinConfigError as e:
             pretty_print_error(e)
             ctx.exit(2)
@@ -508,6 +529,24 @@ def build_cli(argv: Sequence[str]) -> click.Command:
 
         config = merge_profile_with_cli(
             profile=profile_config, cli_values=kwargs, explicitly_set=explicitly_set
+        )
+
+        # start without a connection if nothing on the command line names one
+        # and the config files define profiles but no default profile; the
+        # user picks a profile from the Data Catalog after start-up.
+        available_profiles = list(full_config.profiles)
+        default_profile = full_config.default_profile
+        names_a_connection = {
+            k
+            for k in explicitly_set
+            if k not in SESSION_ONLY_CLI_PARAMS
+            and not (k == "conn_str" and not kwargs.get("conn_str"))
+        }
+        start_disconnected = (
+            not names_a_connection
+            and profile is None
+            and default_profile in (None, "None")
+            and bool(available_profiles)
         )
 
         # detect and install (if necessary) a tzdatabase on Windows
@@ -567,23 +606,34 @@ def build_cli(argv: Sequence[str]) -> click.Command:
         # instantiate the adapter, which was named and imported above -- the
         # key comes off either way, because what is left is its options
         config.pop("adapter", None)
-        try:
-            adapter_instance = adapter_cls(
-                conn_str=conn_str, read_only=read_only, **config
-            )
-        except HarlequinConfigError as e:
-            pretty_print_error(e)
-            ctx.exit(2)
+        adapter_instance: HarlequinAdapter | None = None
+        connection_id: str | None = None
+        if not start_disconnected:
+            try:
+                adapter_instance = adapter_cls(
+                    conn_str=conn_str, read_only=read_only, **config
+                )
+            except HarlequinConfigError as e:
+                pretty_print_error(e)
+                ctx.exit(2)
 
-        connection_id = (
-            adapter_instance.connection_id
-            if adapter_instance.connection_id is not None
-            else get_connection_hash(conn_str, config)
+            connection_id = (
+                adapter_instance.connection_id
+                if adapter_instance.connection_id is not None
+                else get_connection_hash(conn_str, config)
+            )
+
+        # the profile the session is connected to, whether named with -P or
+        # loaded as the config's default profile
+        resolved_profile: str | None = (
+            profile if profile is not None else default_profile
         )
+        if resolved_profile == "None" or start_disconnected:
+            resolved_profile = None
 
         tui = Harlequin(
             adapter=adapter_instance,
-            profile_name=profile,
+            profile_name=resolved_profile,
             keymap_names=keymap_names,
             user_defined_keymaps=user_defined_keymaps,
             connection_hash=connection_id,
@@ -593,6 +643,9 @@ def build_cli(argv: Sequence[str]) -> click.Command:
             show_files=show_files,
             show_s3=show_s3,
             export_path=export_path,
+            available_profiles=available_profiles,
+            config_path=config_path,
+            profile_command_options=frozenset(harlequin_options | hsql_profile_keys()),
         )
         tui.run()
 

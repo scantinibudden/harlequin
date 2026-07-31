@@ -42,8 +42,8 @@ def no_use_catalog_cache(
 ) -> None:
     if "use_cache" in request.keywords:
         return
-    monkeypatch.setattr("harlequin.app.get_catalog_cache", lambda *_: None)
-    monkeypatch.setattr("harlequin.app.update_catalog_cache", lambda *_: None)
+    monkeypatch.setattr("harlequin.app.get_catalog_cache", lambda *_, **__: None)
+    monkeypatch.setattr("harlequin.app.update_catalog_cache", lambda *_, **__: None)
 
 
 @pytest.fixture(autouse=True)

@@ -332,9 +332,10 @@ class EditorCollection(Vertical):
         return self._member_completer
 
     @member_completer.setter
-    def member_completer(self, new_completer: MemberCompleter) -> None:
+    def member_completer(self, new_completer: MemberCompleter | None) -> None:
         self._member_completer = new_completer
-        new_completer.update_buffer_symbols(self._buffer_symbols)
+        if new_completer is not None:
+            new_completer.update_buffer_symbols(self._buffer_symbols)
         self.editor.member_completer = new_completer
 
     @property
@@ -342,9 +343,10 @@ class EditorCollection(Vertical):
         return self._word_completer
 
     @word_completer.setter
-    def word_completer(self, new_completer: WordCompleter) -> None:
+    def word_completer(self, new_completer: WordCompleter | None) -> None:
         self._word_completer = new_completer
-        new_completer.update_buffer_symbols(self._buffer_symbols)
+        if new_completer is not None:
+            new_completer.update_buffer_symbols(self._buffer_symbols)
         self.editor.word_completer = new_completer
 
     @on(CodeEditor.SymbolsFound)

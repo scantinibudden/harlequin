@@ -3,7 +3,7 @@ import shlex
 import sqlite3
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import ANY, MagicMock
 
 import pytest
 from click.testing import CliRunner, Result
@@ -140,6 +140,9 @@ def test_default(
         show_files=None,
         show_s3=None,
         export_path=None,
+        available_profiles=[],
+        config_path=None,
+        profile_command_options=ANY,
     )
 
 
