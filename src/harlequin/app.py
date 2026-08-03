@@ -116,6 +116,13 @@ class DatabaseConnected(Message):
         self.connection = connection
 
 
+class ProfileSwitchFailed(Message):
+    def __init__(self, profile_name: str, error: BaseException) -> None:
+        super().__init__()
+        self.profile_name = profile_name
+        self.error = error
+
+
 class QueryError(Message):
     def __init__(self, query_text: str, error: BaseException) -> None:
         super().__init__()
@@ -219,6 +226,7 @@ class Harlequin(AppBase):
         self.connection_hash = connection_hash
         self.available_profiles = list(available_profiles or [])
         self.config_path = config_path
+        self._switching_profiles = False
         self.history: History | None = None
         self.show_files = show_files
         self.show_s3 = show_s3 or None
@@ -519,6 +527,30 @@ class Harlequin(AppBase):
         message.stop()
         self.switch_profile(message.profile_name)
 
+    @on(ProfileSwitchFailed)
+    def handle_profile_switch_failed(self, message: ProfileSwitchFailed) -> None:
+        # the old connection (if any) is still open and active
+        self._switching_profiles = False
+        self.data_catalog.database_tree.loading = False
+        if self.connection is not None:
+            self.run_query_bar.set_responsive()
+        title = getattr(
+            message.error,
+            "title",
+            "Harlequin could not connect to your database.",
+        )
+        error = (
+            message.error
+            if isinstance(message.error, HarlequinError)
+            else HarlequinConnectionError(msg=str(message.error), title=title)
+        )
+        self._push_error_modal(
+            title="Connection Error",
+            header=f"Could not connect to the profile {message.profile_name}",
+            error=error,
+        )
+        self.update_schema_data()
+
     @on(EditorCollection.EditorSwitched)
     def update_internal_editor_state(
         self, message: EditorCollection.EditorSwitched
@@ -635,6 +667,7 @@ class Harlequin(AppBase):
                     msg=str(message.worker.error), title=title
                 )
             )
+            self._switching_profiles = False
             self.connection = None
             self.profile_name = None
             self._push_error_modal(
@@ -647,6 +680,15 @@ class Harlequin(AppBase):
 
     @on(HarlequinTree.CatalogError)
     def handle_catalog_error(self, message: HarlequinTree.CatalogError) -> None:
+        if message.catalog_type == "database" and self._switching_profiles:
+            # a lazy catalog load raced the profile switch and used the
+            # connection we just replaced; the tree is about to be rebuilt
+            # from the new connection, so don't bother the user.
+            self.log.warning(
+                f"Suppressed a stale database catalog error during a profile "
+                f"switch: {message.error}"
+            )
+            return
         self._push_error_modal(
             title=f"Catalog Error: {message.catalog_type}",
             header=f"Could not populate the {message.catalog_type} data catalog",
@@ -688,6 +730,7 @@ class Harlequin(AppBase):
 
     @on(NewCatalog)
     def handle_new_catalog(self, message: NewCatalog) -> None:
+        self._switching_profiles = False
         tree_catalog = message.catalog
         if self.available_profiles:
             active_name = self.profile_name if self.connection is not None else None
@@ -1143,6 +1186,8 @@ class Harlequin(AppBase):
         """
         if profile_name == self.profile_name and self.connection is not None:
             return
+        self._switching_profiles = True
+        self.data_catalog.database_tree.interrupt_load()
         self.data_catalog.database_tree.loading = True
         self.run_query_bar.set_not_responsive()
         self._switch_profile(profile_name)
@@ -1155,21 +1200,29 @@ class Harlequin(AppBase):
         description="Switching profile",
     )
     def _switch_profile(self, profile_name: str) -> None:
-        # persist state for the connection we're leaving
+        # persist state for the connection we're (maybe) leaving
         update_catalog_cache(
             connection_hash=self.connection_hash,
             catalog=None,
             s3_tree=None,
             history=self.history,
         )
-        if self.connection is not None:
-            old_connection = self.connection
-            self.connection = None
+        # connect to the new profile BEFORE closing the old connection, so
+        # a failed switch leaves the current session intact, and in-flight
+        # catalog loads against the old connection don't hit a closed pool.
+        try:
+            adapter, connection_hash = build_adapter_for_profile(
+                profile_name=profile_name, config_path=self.config_path
+            )
+            connection = adapter.connect()
+        except BaseException as e:
+            self.post_message(ProfileSwitchFailed(profile_name=profile_name, error=e))
+            return
+        old_connection = self.connection
+        self.connection = None
+        if old_connection is not None:
             with suppress(Exception):
                 old_connection.close()
-        adapter, connection_hash = build_adapter_for_profile(
-            profile_name=profile_name, config_path=self.config_path
-        )
         self.adapter = adapter
         self.profile_name = profile_name
         self.connection_hash = connection_hash
@@ -1180,7 +1233,6 @@ class Harlequin(AppBase):
         # the new catalog after the connection is made.
         self.editor_collection.word_completer = None
         self.editor_collection.member_completer = None
-        connection = self.adapter.connect()
         self.post_message(DatabaseConnected(connection=connection))
 
     @work(

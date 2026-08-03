@@ -76,6 +76,7 @@ def test_wrap_adhoc_session(inner_catalog: Catalog) -> None:
     )
     assert len(wrapped.items) == 2
     [local, session] = wrapped.items
+    assert isinstance(local, ProfileCatalogItem)
     assert not local.is_active
     assert isinstance(session, ProfileCatalogItem)
     assert session.is_active
