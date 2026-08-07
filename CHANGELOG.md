@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Double-clicking a result cell now opens an editor to change its value; on confirm it runs an `UPDATE` against the source table (with the row identified by its primary key) and reflects the new value in the grid. Requires an adapter that reports editable columns (supported by harlequin-postgres).
 - The Data Catalog now shows all of the profiles defined in your config files and can switch between them at runtime: select a profile node and press Enter (or use the "Connect" context menu item) to make it the active connection ([#990](https://github.com/tconbeer/harlequin/discussions/990)).
 - If your config files define profiles but no default profile, running `harlequin` with no connection options now starts without a connection, so you can pick a profile from the Data Catalog.
+- Clicking a column header in the Results Viewer sorts by that column: the query is rewritten with an `order by` and re-run, so the database does the sorting and a `limit` returns the true top rows. Clicking the same header again flips ascending to descending. Sorted columns are marked `▲` or `▼`; every other column carries a dim `⇅` to show it can be sorted. The clause is written back into the editor, so you can see and edit it, and a hand-written `order by` marks its header the same way.
 
 ### Performance
 
