@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - Double-clicking (or pressing <kbd>enter</kbd> on) a table or view in the Data Catalog now opens its data directly, running `select * from <relation> limit 100` in a new buffer, instead of only inserting its name into the editor.
+- Each Query Editor tab now has a clickable `✕` close button, in addition to <kbd>ctrl+w</kbd>.
 
 ### Performance
 
