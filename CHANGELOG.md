@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- Clicking a column header in the Results Viewer sorts by that column: the query is rewritten with an `order by` and re-run, so the database does the sorting and a `limit` returns the true top rows. Clicking the same header again flips ascending to descending. Sorted columns are marked `▲` or `▼`; every other column carries a dim `⇅` to show it can be sorted. The clause is written back into the editor, so you can see and edit it, and a hand-written `order by` marks its header the same way.
+
+
+- Double-clicking (or pressing <kbd>enter</kbd> on) a table or view in the Data Catalog now opens its data directly, running `select * from <relation> limit 100` in a new buffer, instead of only inserting its name into the editor.
+
+
 - Each Query Editor tab has a clickable ˣ that closes it, alongside <kbd>ctrl+w</kbd>.
 - Press <kbd>e</kbd> on a result cell, or double-click it, to edit it. A modal shows the `update` that will run against the cell's table, keyed on its primary key, and the grid then shows the value the database stored. Needs an adapter that reports where each column comes from, through `HarlequinCursor.editable_columns()`; harlequin-postgres does.
 

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from rich.style import Style
 from rich.text import Text
-from textual import events
+from textual import events, on
 from textual.coordinate import Coordinate
 from textual.css.query import NoMatches
 from textual.message import Message
@@ -26,6 +26,12 @@ if TYPE_CHECKING:
     from harlequin.query import ResultSet
 
 
+SORT_ASC_GLYPH = "▲"
+SORT_DESC_GLYPH = "▼"
+SORT_HINT_GLYPH = "⇅"
+"""Shown on every unsorted column, so the header width doesn't shift on sort."""
+
+
 class ResultsTable(DataTable, inherit_bindings=False):
     DEFAULT_CSS = """
         ResultsTable {
@@ -45,8 +51,28 @@ class ResultsTable(DataTable, inherit_bindings=False):
             self.coordinate = coordinate
             self.column_label = column_label
 
+    class SortRequested(Message):
+        """Posted when the user clicks a column header to sort by that column."""
+
+        def __init__(self, column: str, descending: bool) -> None:
+            self.column = column
+            self.descending = descending
+            super().__init__()
+
     def on_mount(self) -> None:
         self.post_message(WidgetMounted(widget=self))
+
+    @on(DataTable.HeaderSelected)
+    def _sort_on_header_click(self, event: DataTable.HeaderSelected) -> None:
+        """Clicking a header cycles that column asc -> desc -> asc."""
+        event.stop()
+        index = event.column_index
+        if not 0 <= index < len(self.plain_column_labels):
+            return
+        column = self.plain_column_labels[index]
+        # A column we aren't sorted by starts ascending; the current one flips.
+        descending = column == self.sort_column and not self.sort_descending
+        self.post_message(self.SortRequested(column=column, descending=descending))
 
     def __init__(
         self,
@@ -55,6 +81,9 @@ class ResultsTable(DataTable, inherit_bindings=False):
         data: Any | None = None,
         column_labels: list[str | Text] | None = None,
         plain_column_labels: list[str | Text] | None = None,
+        source_query: str = "",
+        sort_column: str | None = None,
+        sort_descending: bool = False,
         column_widths: list[int | None] | None = None,
         max_column_content_width: int | None = None,
         show_header: bool = True,
@@ -89,6 +118,10 @@ class ResultsTable(DataTable, inherit_bindings=False):
         # there were more rows behind it that nobody fetched.
         self.fetched_row_count = fetched_row_count
         self.fetch_truncated = fetch_truncated
+        self.source_query = source_query
+        """The SQL that produced this result, and that sorting rewrites."""
+        self.sort_column = sort_column
+        self.sort_descending = sort_descending
         super().__init__(
             backend=backend,
             data=data,
@@ -184,15 +217,28 @@ class ResultsViewer(TabbedContent, can_focus=True):
             except NoMatches:
                 return None
 
-    async def push_table(self, table_id: str, result: ResultSet) -> ResultsTable:
+    async def push_table(
+        self,
+        table_id: str,
+        result: ResultSet,
+        sort_column: str | None = None,
+        sort_descending: bool = False,
+    ) -> ResultsTable:
         formatted_labels = [
-            self._format_column_label(col_name, col_type)
+            self._format_column_label(
+                col_name,
+                col_type,
+                sorted_descending=sort_descending if col_name == sort_column else None,
+            )
             for col_name, col_type in result.columns
         ]
         table = ResultsTable(
             id=table_id,
             column_labels=formatted_labels,  # type: ignore
             plain_column_labels=[col_name for (col_name, _) in result.columns],
+            source_query=result.statement.sql,
+            sort_column=sort_column,
+            sort_descending=sort_descending,
             # the backend was built by `harlequin.query.fetch()`, which already
             # applied `viewer_max_rows` as its row cap.
             backend=result.backend,
@@ -298,10 +344,23 @@ class ResultsViewer(TabbedContent, can_focus=True):
             return f"(Showing {shown:,} of {total:,} Records)"
         return f"({total:,} Records)"
 
-    def _format_column_label(self, col_name: str, col_type: str) -> Text:
+    def _format_column_label(
+        self, col_name: str, col_type: str, sorted_descending: bool | None = None
+    ) -> Text:
+        """Build a header label, ending in the column's sort indicator.
+
+        `sorted_descending` is None for a column we aren't sorted by, which gets
+        the dim hint glyph. Every column carries a glyph so that sorting never
+        changes a header's width.
+        """
         type_label_style = self.get_component_rich_style("results-viewer--type-label")
         type_label_fg_style = Style(color=type_label_style.color)
         label = Text.assemble(col_name, " ", (col_type, type_label_fg_style))
+        if sorted_descending is None:
+            label.append(f" {SORT_HINT_GLYPH}", Style(dim=True))
+        else:
+            glyph = SORT_DESC_GLYPH if sorted_descending else SORT_ASC_GLYPH
+            label.append(f" {glyph}", Style(bold=True))
         return label
 
     def _get_max_col_width(self) -> int:
