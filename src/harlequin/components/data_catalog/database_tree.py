@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from asyncio import PriorityQueue
+from asyncio import PriorityQueue, QueueEmpty
 from typing import TYPE_CHECKING, Generator, Iterable, TypeVar
 
 from rich.style import Style
@@ -20,6 +20,7 @@ from harlequin.catalog import (
 )
 from harlequin.components.data_catalog.tree import HarlequinTree
 from harlequin.messages import NewCatalogItems, WidgetMounted
+from harlequin.profiles import ProfileCatalogItem
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -113,6 +114,11 @@ class DatabaseTree(HarlequinTree[CatalogItem], inherit_bindings=False):
         self.root.data.children = catalog.items if catalog is not None else []
         await self.reload()
         self._schedule_prefetch_scan()
+        # the active profile's node starts expanded, so its catalog is visible
+        # (and therefore prefetched by the viewport scan) as soon as we connect
+        for child in self.root.children:
+            if isinstance(child.data, ProfileCatalogItem) and child.data.is_active:
+                child.expand()
         self.loading = False
 
     def _add_to_load_queue(
@@ -185,6 +191,22 @@ class DatabaseTree(HarlequinTree[CatalogItem], inherit_bindings=False):
     def _on_resize(self, event: events.Resize) -> None:
         super()._on_resize(event)
         self._schedule_prefetch_scan()
+
+    def interrupt_load(self) -> None:
+        """Discard any queued lazy-load work. Call when the connection that
+        the tree's items hold is about to be replaced, so the loader doesn't
+        fetch children over a closing connection."""
+        while not self._load_queue.empty():
+            try:
+                self._load_queue.get_nowait()
+                self._load_queue.task_done()
+            except (QueueEmpty, ValueError):
+                break
+        # The queue and the maps tracking what is queued or in flight have to be
+        # reset together, exactly as reload() does; a node left behind in
+        # _queued_priority is treated as still pending and never re-queued.
+        self._queued_priority.clear()
+        self._loading.clear()
 
     def reload(self) -> AwaitComplete:
         """Reload the `DirectoryTree` contents.

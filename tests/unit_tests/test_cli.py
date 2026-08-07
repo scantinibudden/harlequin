@@ -51,12 +51,14 @@ def mock_empty_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "harlequin.cli.get_config_for_profile", lambda **_: (dict(), [])
     )
+    monkeypatch.setattr("harlequin.cli.load_config", lambda **_: dict())
 
 
 @pytest.fixture()
 def mock_load_config(monkeypatch: pytest.MonkeyPatch) -> Config:
     config: Config = {"profiles": {"test-profile": {"theme": "fruity"}}}
     monkeypatch.setattr("harlequin.config.load_config", lambda *_: config)
+    monkeypatch.setattr("harlequin.cli.load_config", lambda **_: config)
     return config
 
 
@@ -103,6 +105,8 @@ def test_default(
         theme=DEFAULT_THEME,
         show_files=None,
         show_s3=None,
+        available_profiles=[],
+        config_path=None,
     )
 
 

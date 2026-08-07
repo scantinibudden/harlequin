@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 - Each Query Editor tab now has a clickable `✕` close button, in addition to <kbd>ctrl+w</kbd>.
 - Foreign-key cells in the Results Viewer are marked with a `↗` glyph; single-clicking one navigates to the referenced row (`select * from <ref_table> where <ref_col> = <value>`) in a new buffer. Requires an adapter that reports foreign keys (supported by harlequin-postgres); works across joins.
 - Double-clicking a result cell now opens an editor to change its value; on confirm it runs an `UPDATE` against the source table (with the row identified by its primary key) and reflects the new value in the grid. Requires an adapter that reports editable columns (supported by harlequin-postgres).
+- The Data Catalog now shows all of the profiles defined in your config files and can switch between them at runtime: select a profile node and press Enter (or use the "Connect" context menu item) to make it the active connection ([#990](https://github.com/tconbeer/harlequin/discussions/990)).
+- If your config files define profiles but no default profile, running `harlequin` with no connection options now starts without a connection, so you can pick a profile from the Data Catalog.
 
 ### Performance
 

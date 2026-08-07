@@ -43,6 +43,11 @@ class HarlequinDriver:
     class Refreshcatalog(Message):
         pass
 
+    class ConnectToProfile(Message):
+        def __init__(self, profile_name: str) -> None:
+            super().__init__()
+            self.profile_name = profile_name
+
     def __init__(self, app: Harlequin) -> None:
         self.app = app
 
@@ -80,3 +85,9 @@ class HarlequinDriver:
         Force a refresh of the catalog.
         """
         self.app.post_message(self.Refreshcatalog())
+
+    def connect_to_profile(self, profile_name: str) -> None:
+        """
+        Make the named config profile Harlequin's active connection.
+        """
+        self.app.post_message(self.ConnectToProfile(profile_name=profile_name))

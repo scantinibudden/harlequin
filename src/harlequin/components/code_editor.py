@@ -245,7 +245,7 @@ class EditorCollection(TabbedContent):
         return self._member_completer
 
     @member_completer.setter
-    def member_completer(self, new_completer: MemberCompleter) -> None:
+    def member_completer(self, new_completer: MemberCompleter | None) -> None:
         self._member_completer = new_completer
         try:
             self.current_editor.member_completer = new_completer
@@ -257,7 +257,7 @@ class EditorCollection(TabbedContent):
         return self._word_completer
 
     @word_completer.setter
-    def word_completer(self, new_completer: WordCompleter) -> None:
+    def word_completer(self, new_completer: WordCompleter | None) -> None:
         self._word_completer = new_completer
         try:
             self.current_editor.word_completer = new_completer

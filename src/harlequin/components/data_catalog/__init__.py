@@ -68,7 +68,10 @@ class ContextMenu(OptionList):
             if node.data.INTERACTIONS is not None:
                 other_interactions = node.data.INTERACTIONS
 
-        self.interactions = [*self.DEFAULT_INTERACTIONS, *other_interactions]
+        # items without a query_name (e.g., profile nodes) have nothing
+        # to insert into the editor.
+        default_interactions = self.DEFAULT_INTERACTIONS if node.data.query_name else []
+        self.interactions = [*default_interactions, *other_interactions]
 
         for label, _ in self.interactions:
             self.add_option(escape(label))
