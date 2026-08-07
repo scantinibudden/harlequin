@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - Double-clicking (or pressing <kbd>enter</kbd> on) a table or view in the Data Catalog now opens its data directly, running `select * from <relation> limit 100` in a new buffer, instead of only inserting its name into the editor.
 - Each Query Editor tab now has a clickable `✕` close button, in addition to <kbd>ctrl+w</kbd>.
+- Foreign-key cells in the Results Viewer are marked with a `↗` glyph; single-clicking one navigates to the referenced row (`select * from <ref_table> where <ref_col> = <value>`) in a new buffer. Requires an adapter that reports foreign keys (supported by harlequin-postgres); works across joins.
+- Double-clicking a result cell now opens an editor to change its value; on confirm it runs an `UPDATE` against the source table (with the row identified by its primary key) and reflects the new value in the grid. Requires an adapter that reports editable columns (supported by harlequin-postgres).
 
 ### Performance
 
