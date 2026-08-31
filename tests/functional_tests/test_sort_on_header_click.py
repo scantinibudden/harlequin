@@ -178,3 +178,23 @@ async def test_other_statements_in_the_buffer_are_preserved(
         await click_header(app, pilot, wait_for_workers, 0)
         assert column_values(app, 0) == [1, 2, 3]
         assert editor_text(app) == f'select 1 as x;\n\n{THREE_ROWS}\norder by "a" asc;'
+
+
+@pytest.mark.asyncio
+async def test_computed_and_duplicated_columns_are_ordered_by_position(
+    app: Harlequin, wait_for_workers: Waiter
+) -> None:
+    async with app.run_test(size=(120, 36)) as pilot:
+        await ready(app, pilot, wait_for_workers)
+        sql = "select a, a+1, a as a from (values (2), (1)) as t(a)"
+        await run_sql(app, pilot, wait_for_workers, sql)
+
+        # a+1 is displayed under a name that is not an identifier
+        await click_header(app, pilot, wait_for_workers, 1)
+        assert column_values(app, 1) == [2, 3]
+        assert editor_text(app) == f"{sql}\norder by 2 asc"
+
+        # the third column shares its name with the first
+        await click_header(app, pilot, wait_for_workers, 2)
+        assert editor_text(app) == f"{sql}\norder by 3 asc"
+        assert column_values(app, 0) == [1, 2]

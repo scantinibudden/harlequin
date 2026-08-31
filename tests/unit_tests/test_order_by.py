@@ -130,3 +130,14 @@ def test_parse_trailing_order_by(sql: str, expected: tuple[str, bool] | None) ->
 def test_parse_round_trips_with_writer() -> None:
     written = with_order_by("select * from t limit 100", "some col", descending=True)
     assert parse_trailing_order_by(written) == ("some col", True)
+
+
+def test_with_order_by_position_for_columns_without_a_usable_name() -> None:
+    assert with_order_by("select a, a+1 from t", None, False, position=2) == (
+        "select a, a+1 from t\norder by 2 asc"
+    )
+    assert with_order_by("select a from t limit 5", None, True, position=1) == (
+        "select a from t\norder by 1 desc\nlimit 5"
+    )
+    with pytest.raises(ValueError):
+        with_order_by("select 1", None, False)

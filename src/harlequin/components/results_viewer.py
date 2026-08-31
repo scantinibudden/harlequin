@@ -79,6 +79,7 @@ class ResultsTable(DataTable, inherit_bindings=False):
             column_index: int | None,
             column_name: str,
             descending: bool,
+            by_position: bool = False,
         ) -> None:
             super().__init__()
             self.source_query = source_query
@@ -86,6 +87,8 @@ class ResultsTable(DataTable, inherit_bindings=False):
             self.column_index = column_index
             self.column_name = column_name
             self.descending = descending
+            self.by_position = by_position
+            """Order by the column's position: its name is computed or duplicated."""
 
     def on_mount(self) -> None:
         # every value in a foreign-key column is rendered with the glyph beside it
@@ -113,13 +116,16 @@ class ResultsTable(DataTable, inherit_bindings=False):
             requested = (index, True)
         else:
             requested = (None, False)
+        name = self.plain_column_labels[index]
         self.post_message(
             self.SortRequested(
                 source_query=self.source_query,
                 query_text=self.query_text,
                 column_index=requested[0],
-                column_name=self.plain_column_labels[index],
+                column_name=name,
                 descending=requested[1],
+                by_position=not name.isidentifier()
+                or self.plain_column_labels.count(name) > 1,
             )
         )
 

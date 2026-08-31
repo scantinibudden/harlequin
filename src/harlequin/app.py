@@ -527,7 +527,10 @@ class Harlequin(AppBase):
             message.source_query
             if message.column_index is None
             else with_order_by(
-                message.source_query, message.column_name, message.descending
+                message.source_query,
+                None if message.by_position else message.column_name,
+                message.descending,
+                position=message.column_index + 1,
             )
         )
         buffer_text = self.editor.text

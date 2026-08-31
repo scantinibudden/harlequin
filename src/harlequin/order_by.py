@@ -139,12 +139,17 @@ def parse_trailing_order_by(sql: str) -> tuple[str, bool] | None:
     return column, (match.group("direction") or "").lower() == "desc"
 
 
-def with_order_by(sql: str, column: str, descending: bool) -> str:
+def with_order_by(
+    sql: str, column: str | None, descending: bool, position: int | None = None
+) -> str:
     """Return `sql` sorted by `column`, replacing any ORDER BY it already has.
 
     The clause is inserted before LIMIT/OFFSET rather than wrapping the query in
     a subquery, so the database sorts the whole result and the limit then takes
     the true top rows -- wrapping would only reorder the rows already fetched.
+
+    With `column` None the clause orders by `position` (1-based) instead: a
+    computed or duplicated result column has no name the database would accept.
     """
     body_sql, terminator = _strip_terminator(sql)
     order_start, tail_start = _split_tail(body_sql)
@@ -153,7 +158,13 @@ def with_order_by(sql: str, column: str, descending: bool) -> str:
     body = body_sql if cut is None else body_sql[:cut]
     tail = "" if tail_start is None else body_sql[tail_start:]
 
-    clause = f"order by {quote_identifier(column)} {'desc' if descending else 'asc'}"
+    if column is None:
+        if position is None:
+            raise ValueError("with_order_by() needs a column name or a position")
+        target = str(position)
+    else:
+        target = quote_identifier(column)
+    clause = f"order by {target} {'desc' if descending else 'asc'}"
     parts = [body.rstrip(), clause]
     if tail.strip():
         parts.append(tail.strip())
