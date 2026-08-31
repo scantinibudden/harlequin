@@ -700,6 +700,23 @@ class Harlequin(AppBase):
             return str(value)
         return "'" + str(value).replace("'", "''") + "'"
 
+    @on(ResultsTable.ForeignKeyFollowed)
+    async def follow_foreign_key(
+        self, message: ResultsTable.ForeignKeyFollowed
+    ) -> None:
+        message.stop()
+        if self.editor is None:
+            self._recycle_message(message)
+            return
+        query = (
+            f"select *\nfrom {message.ref_table}\n"
+            f"where {message.ref_col} = {self._sql_literal(message.value)}"
+        )
+        await self.editor_collection.insert_buffer_with_text(query_text=query)
+        self.post_message(
+            QuerySubmitted(queries=[query], limit=self.run_query_bar.limit_value)
+        )
+
     @on(HarlequinDriver.ConfirmAndExecute)
     def driver_confirm_and_execute(
         self, message: HarlequinDriver.ConfirmAndExecute
@@ -1556,6 +1573,7 @@ class Harlequin(AppBase):
                 )
                 if executed.cursor is not None:
                     results[id_].editable_columns = executed.cursor.editable_columns()
+                    results[id_].foreign_keys = executed.cursor.foreign_key_columns()
             except BaseException as e:
                 errors.append((e, executed.statement.sql))
         # each ResultSet times its own fetch; the app reports the batch,

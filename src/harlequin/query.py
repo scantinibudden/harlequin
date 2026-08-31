@@ -112,6 +112,11 @@ class ResultSet:
     elapsed: float
     """Seconds spent fetching, not including execution."""
 
+    foreign_keys: dict[int, tuple[str, str]] = field(default_factory=dict)
+    """Result-column index -> (referenced table, referenced column), for the
+    columns the cursor reports as foreign keys; see
+    `HarlequinCursor.foreign_key_columns()`."""
+
     editable_columns: dict[int, tuple[str, str, bool]] = field(default_factory=dict)
     """Result-column index -> (table, column, is primary key), for the columns
     the cursor reports as read straight from a table; see

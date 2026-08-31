@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
+from rich.align import Align
+from rich.cells import cell_len
+from rich.console import RenderableType
 from rich.style import Style
 from rich.text import Text
 from textual import events, on
@@ -26,6 +29,7 @@ if TYPE_CHECKING:
     from harlequin.query import ResultSet
 
 
+FOREIGN_KEY_GLYPH = "↗"
 SORT_ASC_GLYPH = "▲"
 SORT_DESC_GLYPH = "▼"
 SORT_HINT_GLYPH = "⇅"
@@ -39,6 +43,19 @@ class ResultsTable(DataTable, inherit_bindings=False):
             width: 100%;
         }
     """
+    COMPONENT_CLASSES: ClassVar[set[str]] = {
+        *DataTable.COMPONENT_CLASSES,
+        "results-table--foreign-key",
+    }
+
+    class ForeignKeyFollowed(Message):
+        """The glyph on a foreign-key cell was clicked."""
+
+        def __init__(self, ref_table: str, ref_col: str, value: Any) -> None:
+            super().__init__()
+            self.ref_table = ref_table
+            self.ref_col = ref_col
+            self.value = value
 
     class CellEditRequested(Message):
         """The user asked to edit the cell under the cursor."""
@@ -60,6 +77,12 @@ class ResultsTable(DataTable, inherit_bindings=False):
             super().__init__()
 
     def on_mount(self) -> None:
+        # every value in a foreign-key column is rendered with the glyph beside it
+        for column_index in self.foreign_keys:
+            if self.is_valid_column_index(column_index):
+                self.ordered_columns[column_index].content_width += cell_len(
+                    f"{FOREIGN_KEY_GLYPH} "
+                )
         self.post_message(WidgetMounted(widget=self))
 
     @on(DataTable.HeaderSelected)
@@ -106,8 +129,10 @@ class ResultsTable(DataTable, inherit_bindings=False):
         fetched_row_count: int | None = None,
         fetch_truncated: bool = False,
         editable_columns: dict[int, tuple[str, str, bool]] | None = None,
+        foreign_keys: dict[int, tuple[str, str]] | None = None,
     ):
         self.editable_columns = editable_columns or {}
+        self.foreign_keys = foreign_keys or {}
         self.plain_column_labels: list[str] = (
             [str(label) for label in plain_column_labels]
             if plain_column_labels is not None
@@ -145,6 +170,62 @@ class ResultsTable(DataTable, inherit_bindings=False):
             disabled=disabled,
             null_rep=null_rep,
             render_markup=render_markup,
+        )
+        # the glyph is styled by its component class, not as a link
+        self.auto_links = False
+
+    def _get_cell_renderable(
+        self, row_index: int, column_index: int, max_width: int | None = None
+    ) -> RenderableType | Text:
+        if row_index < 0 or column_index not in self.foreign_keys:
+            return super()._get_cell_renderable(row_index, column_index, max_width)
+        marker_width = cell_len(f"{FOREIGN_KEY_GLYPH} ")
+        cell = super()._get_cell_renderable(
+            row_index,
+            column_index,
+            None if max_width is None else max_width - marker_width,
+        )
+        if self.get_cell_at(Coordinate(row_index, column_index)) is None:
+            return cell
+        # clicking the glyph runs the action; the value itself stays a plain cell
+        glyph_style = self.get_component_rich_style(
+            "results-table--foreign-key"
+        ) + Style.from_meta(
+            {"@click": f"follow_foreign_key({row_index}, {column_index})"}
+        )
+        if isinstance(cell, Align):
+            value = self._as_text(cell.renderable)
+            if value is None:
+                return cell
+            # a right-aligned value keeps the glyph on the column's edge
+            marked = (
+                Text.assemble(value, " ", (FOREIGN_KEY_GLYPH, glyph_style))
+                if cell.align == "right"
+                else Text.assemble((FOREIGN_KEY_GLYPH, glyph_style), " ", value)
+            )
+            return Align(marked, align=cell.align, style=cell.style)
+        value = self._as_text(cell)
+        if value is None:
+            return cell
+        return Text.assemble((FOREIGN_KEY_GLYPH, glyph_style), " ", value)
+
+    @staticmethod
+    def _as_text(renderable: RenderableType) -> Text | None:
+        """The formatter's str cells are console markup; anything else is left alone."""
+        if isinstance(renderable, Text):
+            return renderable
+        if isinstance(renderable, str):
+            return Text.from_markup(renderable)
+        return None
+
+    def action_follow_foreign_key(self, row_index: int, column_index: int) -> None:
+        ref_table, ref_col = self.foreign_keys[column_index]
+        self.post_message(
+            self.ForeignKeyFollowed(
+                ref_table=ref_table,
+                ref_col=ref_col,
+                value=self.get_cell_at(Coordinate(row_index, column_index)),
+            )
         )
 
     def action_view_cell(self) -> None:
@@ -245,6 +326,7 @@ class ResultsViewer(TabbedContent, can_focus=True):
             fetched_row_count=result.fetched_row_count,
             fetch_truncated=result.truncated,
             editable_columns=result.editable_columns,
+            foreign_keys=result.foreign_keys,
             cursor_type="range",
             max_column_content_width=self.max_col_width,
             null_rep="[dim]∅ null[/]",

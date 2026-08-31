@@ -384,6 +384,10 @@ ResultsTable > .datatable--hover {
     background: $boost;
 }
 
+ResultsTable > .results-table--foreign-key {
+    color: $secondary;
+}
+
 /* TEXT MODALS (CELL VIEW, CELL EDIT, ERROR) */
 TextModal,
 CellEditModal {
