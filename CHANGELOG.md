@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - Each Query Editor tab has a clickable ˣ that closes it, alongside <kbd>ctrl+w</kbd>.
+- Press <kbd>e</kbd> on a result cell, or double-click it, to edit it. A modal shows the `update` that will run against the cell's table, keyed on its primary key, and the grid then shows the value the database stored. Needs an adapter that reports where each column comes from, through `HarlequinCursor.editable_columns()`; harlequin-postgres does.
 
 ## [2.12.1] - 2026-08-30
 
