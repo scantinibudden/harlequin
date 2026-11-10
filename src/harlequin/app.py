@@ -503,6 +503,20 @@ class Harlequin(AppBase):
         if node_data is not None and any(
             cls.__name__ == "RelationCatalogItem" for cls in type(node_data).__mro__
         ):
+            # an adapter can point queries at the item's own database first
+            activate = getattr(node_data, "activate", None)
+            if callable(activate):
+                try:
+                    notice = activate()
+                except HarlequinError as e:
+                    self._push_error_modal(
+                        title=e.title or "Harlequin could not open the relation.",
+                        header="Harlequin could not open the relation.",
+                        error=e,
+                    )
+                    return
+                if notice:
+                    self.notify(notice)
             query = f"select *\nfrom {node_data.query_name}\nlimit 100"
             await self.editor_collection.insert_buffer_with_text(query_text=query)
             self.post_message(QuerySubmitted(queries=[query], limit=None))
